@@ -6,8 +6,7 @@
 - 能執行：`nvidia-smi` 如果可以看到 GPU 資訊，代表驅動 OK。
 ## 1. 更新系統套件
 ```sh
-sudo apt update
-sudo apt upgrade -y
+sudo apt update && sudo apt upgrade -y
 ```
 ## 2. 安裝 Docker
 ### (1) 安裝必要工具
@@ -17,6 +16,8 @@ sudo apt install -y ca-certificates curl gnupg lsb-release
 ### (2) 加入 Docker 官方 GPG key
 ```sh
 sudo mkdir -p /etc/apt/keyrings
+```
+```sh
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
 sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 ```
@@ -30,7 +31,7 @@ sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 ```
 ### (4) 安裝 Docker Engine
 ```sh
-sudo apt update
+sudo apt update && \
 sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 ```
 ## 3. 驗證 Docker 是否正常
@@ -40,13 +41,11 @@ sudo docker run hello-world
 若看到 Hello from Docker! 代表成功
 ## 4. 讓目前使用者可免 sudo 使用 docker（建議）
 ```sh
-sudo usermod -aG docker $USER
-newgrp docker
+sudo usermod -aG docker $USER && newgrp docker
 ```
-重新開一個 terminal 後測試：
-```sh
-docker run hello-world
-```
+> 重開 terminal 後再執行一次 `docker run hello-world` 確認。
+
+
 ## 5. 安裝 NVIDIA Container Toolkit
 ### (1) 加入 NVIDIA repository
 ```sh
@@ -60,12 +59,12 @@ sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
 ```
 ### (2) 安裝 toolkit
 ```sh
-sudo apt update
+sudo apt update && \
 sudo apt install -y nvidia-container-toolkit
 ```
 ## 6. 設定 Docker 使用 NVIDIA runtime
 ```sh
-sudo nvidia-ctk runtime configure --runtime=docker
+sudo nvidia-ctk runtime configure --runtime=docker && \
 sudo systemctl restart docker
 ```
 ## 7. 測試 GPU 是否能在 Docker 使用
