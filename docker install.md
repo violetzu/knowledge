@@ -6,7 +6,8 @@
 - 能執行：`nvidia-smi` 如果可以看到 GPU 資訊，代表驅動 OK。
 ## 1. 更新系統套件
 ```sh
-sudo apt update && sudo apt upgrade -y
+sudo apt update && \
+sudo apt upgrade -y
 ```
 ## 2. 安裝 Docker
 ### (1) 安裝必要工具
@@ -41,7 +42,8 @@ sudo docker run hello-world
 若看到 Hello from Docker! 代表成功
 ## 4. 讓目前使用者可免 sudo 使用 docker（建議）
 ```sh
-sudo usermod -aG docker $USER && newgrp docker
+sudo usermod -aG docker $USER && \
+newgrp docker
 ```
 > 重開 terminal 後再執行一次 `docker run hello-world` 確認。
 
