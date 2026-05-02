@@ -58,6 +58,10 @@ LLM_BASE_URL=http://localhost:8000/v1
 LLM_API_KEY=
 LLM_MODEL=
 
+# ── §B FastAPI 服務（有 FastAPI service 才填）────────────────────────────────
+FASTAPI_API_SECRET=changeme
+INTERNAL_TOKEN_EXPIRE_MINUTES=60
+
 # ── Dev only ──────────────────────────────────────────────────────────────────
 # 讓 Tunnel HMR WebSocket 可以連到 Next.js dev server（逗號分隔多個 domain）
 ALLOWED_DEV_ORIGINS=your-domain.example.com
@@ -799,6 +803,8 @@ services:
       AUTH_TRUST_HOST: "true"
       APP_PASSWORD: ${APP_PASSWORD}
       DATABASE_URL: postgresql://<project>:${POSTGRES_PASSWORD}@db:5432/<project>
+      FASTAPI_SERVICE_URL: http://fastapi:8000
+      FASTAPI_API_SECRET: ${FASTAPI_API_SECRET}
       WATCHPACK_POLLING: "true"
       CHOKIDAR_USEPOLLING: "true"
       ALLOWED_DEV_ORIGINS: ${ALLOWED_DEV_ORIGINS:-}
@@ -1034,7 +1040,7 @@ vLLM 啟動後，`LLM_BASE_URL` 指向 `http://vllm:8000/v1`（docker 內部）�
 
 - §B：前端呼叫 FastAPI 一律走 `/api/fastapi/...`，不直接用 `FASTAPI_SERVICE_URL`
 - 人類使用者登入（Auth-1/2）預設放在 Next.js；backend 只處理內部 token 與資源授權（Auth-3）
-- DB migration 用 `make db-migrate`，不要直接改 schema 沒有 migration
+- DB migration：本地用 `npx prisma migrate dev` 建立 migration 檔案，部署時 `entrypoint.sh` 自動執行 `prisma migrate deploy`
 - （專案自訂規則加在這裡）
 
 ## 環境
