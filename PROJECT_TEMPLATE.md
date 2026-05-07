@@ -281,6 +281,8 @@ dev stack 使用 `target: dev` 與自己的 `command`。
 FROM python:3.11-slim
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 WORKDIR /app
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
@@ -293,6 +295,8 @@ CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 FROM python:3.11-slim
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 WORKDIR /app
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
@@ -786,7 +790,7 @@ def verify_internal_token(token: str) -> dict:
 ### D0. FastAPI ML 依賴
 
 - 無 GPU：`python:3.11-slim`，需要 CV 加 `apt-get install ffmpeg libgl1 libglib2.0-0`
-- 有 CUDA：換 `pytorch/pytorch:2.4.0-cuda12.4-cudnn9-runtime`，`uv sync` 加 `--system`（`torch` 由 base image 提供，移出 `pyproject.toml dependencies`）
+- 有 CUDA：換 `pytorch/pytorch:2.4.0-cuda12.4-cudnn9-runtime`；`torch` 由 base image 提供，移出 `pyproject.toml dependencies`；其餘套件仍用 `uv sync --frozen --no-dev`（建 `.venv`）+ `CMD ["uv", "run", "uvicorn", ...]`
 - GPU compose reservation 只加在需要 GPU 的 service；無 GPU 主機不保留 `deploy.resources`
 
 ```yaml
