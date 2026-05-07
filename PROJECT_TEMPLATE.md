@@ -15,7 +15,7 @@
 |------|------|
 | **專案名稱** | 全小寫英數，會用作 DB user、DB name、資料夾名、docker service 名 |
 | **架構** | §A / §B / §C（見 Section 1 決策樹） |
-| **Auth 方式** | Auth-0 不需要 / Auth-1 單一密碼 / Auth-2 個人帳號 |
+| **Auth 方式** | Auth-0 不需要 / Auth-1 單一密碼 / Auth-2 個人帳號（§C 禁用，見 Auth 章節） |
 | **部署網址** | `https://<domain>`，填入 AGENTS.md；Auth-1/2 另填入 `AUTH_URL` |
 
 ### 選問（影響架構，沒提到就問）
@@ -35,7 +35,7 @@
 2. `.env.example`
 3. `docker-compose.yml` / `docker-compose.dev.yml`
 4. `Dockerfile`（± `fastapi-service/Dockerfile`）
-5. `Makefile`、`entrypoint.sh`、`next.config.ts`、`prisma.config.ts`（§A/B 且有 Prisma 時）
+5. `Makefile`、`.dockerignore`、`next.config.ts`、`prisma.config.ts`（§A/B 且有 Prisma 時）
 6. `CLAUDE.md`（內容固定只有一行：`@AGENTS.md`）
 
 ---
@@ -86,8 +86,8 @@ Next.js 同時負責 SSR、Auth、BFF；Python/FastAPI 僅在有推理或長任�
 - `package.json` 必須有 `"type": "module"`
 - generator provider 改 `prisma-client`（非 `prisma-client-js`），`output` 必填
 - datasource 不放 `url`，改放 `prisma.config.ts`
-- `defineConfig`、`env` 從 `"prisma/config"` import
-- `PrismaClient` 從 `@/generated/prisma/client` import，**不從 `@prisma/client`**
+- `defineConfig` 從 `"prisma/config"` import；datasource url 用 `process.env.DATABASE_URL!`（**不用 `env()`**。Prisma 7 官方文件說 `prisma generate` 本身不需要 DB URL，但 CLI 仍會載入 `prisma.config.ts`；`env()` 會在缺少變數時先拋錯）
+- `PrismaClient` 從 `@/generated/prisma/client` import，**不從 `@prisma/client`**（舊專案升級時要全域替換所有 import）
 - driver adapter 必須：`@prisma/adapter-pg` + `pg`（runtime），`prisma` + `@types/pg`（dev）
 - `.gitignore` 加 `src/generated/prisma/`（generated client 不提交）
 
@@ -117,13 +117,13 @@ ALLOWED_DEV_ORIGINS=your-domain.example.com   # Tunnel HMR WebSocket 用
 
 **有 PostgreSQL 時加入：**
 ```dotenv
-POSTGRES_PASSWORD=CHANGE_ME_DB_PASSWORD
+POSTGRES_PASSWORD=CHANGE_ME_DB_PASSWORD  # openssl rand -base64 32
 # POSTGRES_USER / POSTGRES_DB hardcode 成專案名，只有密碼放 env，避免帳號拼錯
 ```
 
 **Auth-1 / Auth-2 才加入：**
 ```dotenv
-AUTH_SECRET=CHANGE_ME_RUN_openssl_rand_base64_32
+AUTH_SECRET=CHANGE_ME  # openssl rand -base64 32
 AUTH_URL=https://your-domain.example.com
 ```
 
@@ -140,7 +140,7 @@ GOOGLE_CLIENT_SECRET=
 
 **§B / §C 有 FastAPI 才加入：**
 ```dotenv
-FASTAPI_API_SECRET=CHANGE_ME_RUN_openssl_rand_base64_32
+FASTAPI_API_SECRET=CHANGE_ME  # openssl rand -base64 32
 INTERNAL_TOKEN_EXPIRE_MINUTES=60
 ```
 
@@ -211,7 +211,7 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  output: "standalone",           // 缺少時 runner stage 的 server.js 不會生成
+  output: "standalone",
   ...(process.env.ALLOWED_DEV_ORIGINS && {
     allowedDevOrigins: process.env.ALLOWED_DEV_ORIGINS.split(","),
   }),                             // Cloudflare Tunnel HMR WebSocket；必須用 env，不能 hardcode
@@ -264,32 +264,18 @@ builder stage：
 RUN npx prisma generate && npm run build
 ```
 
-runner stage 額外複製（standalone trace 不包含這些）並替換 CMD：
-```dockerfile
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
-COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=builder /app/node_modules/dotenv ./node_modules/dotenv
-COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-ENTRYPOINT ["/entrypoint.sh"]
-CMD ["node", "server.js"]
-```
+> 不需要在 build stage 塞 dummy `DATABASE_URL`。關鍵是 `prisma.config.ts` 用 `process.env.DATABASE_URL!`，不要用 `env("DATABASE_URL")`。這是 Prisma 7 官方文件建議的取捨：`env()` 會強制變數存在；`process.env` 可讓 `prisma generate` 這類不需要 DB 的命令在沒有 `DATABASE_URL` 時仍能執行。
 
-**entrypoint.sh（production migration 自動執行）：**
-```sh
-#!/bin/sh
-set -eu
-npx prisma migrate deploy
-exec "$@"
-```
+runner stage 與基礎版相同（standalone 不含 prisma，migration 由獨立 service 處理）。
 
-dev stack 使用 `target: dev` 與自己的 `command`，不經過 production entrypoint。
+**migration 由 docker-compose 的 `migrate` service 負責**（見 §7），runner stage 保持乾淨。
+`migrate` 使用 `target: builder`，所以 Dockerfile 的 builder stage 必須保留 `COPY . .`，且 `.dockerignore` 不可排除 `prisma/`、`prisma.config.ts`、`package*.json`。
+
+dev stack 使用 `target: dev` 與自己的 `command`。
 
 ### FastAPI Dockerfile（§B/C 基礎版）
 
+§B 無 Alembic 時：
 ```dockerfile
 FROM python:3.11-slim
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
@@ -297,6 +283,19 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 COPY . .
+CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+§C 有 Alembic 時，必須接上 entrypoint：
+```dockerfile
+FROM python:3.11-slim
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev
+COPY . .
+RUN chmod +x /app/entrypoint.sh
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
@@ -316,7 +315,7 @@ def health():
 
 **Port 規則：所有 service 不寫 `ports`**，包含 DB、FastAPI——對外只走 Cloudflare Tunnel，container 間走 Docker 內網。
 
-### §A 完整版
+### §A 完整版（Auth-1 範例；Auth-0 移除 Auth env，Auth-2 依實作追加 OAuth/adapter env）
 
 ```yaml
 x-logging: &default-logging
@@ -343,6 +342,21 @@ services:
       retries: 5
     logging: *default-logging
 
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    command: npx prisma migrate deploy
+    environment:
+      TZ: Asia/Taipei
+      DATABASE_URL: postgresql://<project>:${POSTGRES_PASSWORD}@db:5432/<project>
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: on-failure
+    logging: *default-logging
+
   app:
     build:
       context: .
@@ -358,6 +372,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     logging: *default-logging
 
   tunnel:
@@ -368,6 +384,8 @@ services:
       - app
     logging: *default-logging
 ```
+
+> production migration 失敗時，`app` 會因 `service_completed_successfully` 不啟動；先看 `docker compose logs migrate`，不要先查 app container。
 
 ### §B 在 §A 基礎上的差異
 
@@ -393,7 +411,7 @@ services:
     logging: *default-logging
 ```
 
-`app` service 追加（`depends_on` 要同時保留 `db`，不要漏）：
+`app` service 追加（`depends_on` 要同時保留 `migrate`，不要漏）：
 ```yaml
     environment:
       FASTAPI_SERVICE_URL: http://fastapi:8000
@@ -401,6 +419,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       fastapi:
         condition: service_healthy
 ```
@@ -511,12 +531,12 @@ datasource db {
 ```typescript
 // prisma.config.ts（根目錄）
 import "dotenv/config";
-import { defineConfig, env } from "prisma/config";
+import { defineConfig } from "prisma/config";
 
 export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: { path: "prisma/migrations" },
-  datasource: { url: env("DATABASE_URL") },
+  datasource: { url: process.env.DATABASE_URL! },
 });
 ```
 
@@ -541,9 +561,9 @@ if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 |------|----|----|
 | Next.js Prisma | 有 | 無 |
 | DB 管理 | Prisma（Next.js） | SQLModel + Alembic（FastAPI） |
-| entrypoint | Next.js 側（`prisma migrate deploy`） | FastAPI 側（`alembic upgrade head`） |
-| `app.depends_on` | `db` + `fastapi` | `fastapi` only |
-| `DATABASE_URL` | `app` service | `fastapi` service |
+| migration | `migrate` service（`prisma migrate deploy`） | FastAPI `entrypoint.sh`（`alembic upgrade head`） |
+| `app.depends_on` | `migrate` + `fastapi` | `fastapi` only |
+| `DATABASE_URL` | `migrate` + `app` service | `fastapi` service |
 | dev command | 含 `prisma generate` | 不含 |
 | Next.js Dockerfile | Section 6 Prisma 版 | Section 6 無 Prisma 基礎版 |
 
@@ -595,7 +615,7 @@ async function handler(req: NextRequest, { params }: { params: Promise<{ path: s
 ```
 <project>/
 ├── prisma.config.ts                # Prisma 7 設定，放根目錄（不在 prisma/ 內）
-├── entrypoint.sh                   # production migration 用
+├── .dockerignore                   # 必須包含 data/
 ├── prisma/schema.prisma
 ├── src/
 │   ├── generated/prisma/           # generated client，不提交（.gitignore 排除）
@@ -624,6 +644,7 @@ async function handler(req: NextRequest, { params }: { params: Promise<{ path: s
 ## 12. Auth
 
 > Auth Pattern（Auth-0/1/2）與架構 §A/§B/§C 是不同維度。
+> **§C 禁用 Auth-2**：§C 定義為 FastAPI 管 DB、Next.js 不碰 DB；Auth-2 需要 Auth.js PrismaAdapter 與 Auth tables，會破壞 ownership。需要個人帳號時改選 §B，或另行設計 FastAPI 持有的登入系統。
 
 ### Auth-0：無登入
 
@@ -632,7 +653,7 @@ async function handler(req: NextRequest, { params }: { params: Promise<{ path: s
 ### Auth-1：單一密碼
 
 ```typescript
-// src/lib/auth.ts
+// src/auth.ts
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 
@@ -672,9 +693,18 @@ export const config = {
 };
 ```
 
-`/api/auth/[...nextauth]/route.ts` re-export handlers；docker-compose `environment` 加 `AUTH_TRUST_HOST: "true"`。
+`/api/auth/[...nextauth]/route.ts` re-export handlers：
+```typescript
+// src/app/api/auth/[...nextauth]/route.ts
+import { handlers } from "@/auth";
+export const { GET, POST } = handlers;
+```
+
+docker-compose `environment` 加 `AUTH_TRUST_HOST: "true"`。
 
 ### Auth-2：個人帳號
+
+**僅限 §A/B。§C 禁用 Auth-2；需要個人帳號時改選 §B，或讓 FastAPI 自行持有登入與帳號 DB。**
 
 套件：`next-auth@beta @auth/prisma-adapter bcryptjs zod`，dev: `@types/bcryptjs`
 
@@ -834,7 +864,19 @@ export default { plugins: { "@tailwindcss/postcss": {} } };
 
 根目錄的 `.dockerignore` 對子目錄 build context 無效——§B/C 的 `fastapi-service/` 要另建一份。
 
-根目錄：`node_modules/ .next/ .env* data/ __pycache__/ *.pyc`
+根目錄（`data/` 必須列入，PostgreSQL volume 目錄由 root 建立，沒列會導致 build context 傳送失敗）：
+
+```
+node_modules/
+.next/
+.env*
+!.env.example
+.git/
+data/
+__pycache__/
+*.pyc
+*.dump
+```
 
 `fastapi-service/`（§B/C）：`__pycache__/ *.pyc .venv/ .env*`
 
@@ -847,7 +889,7 @@ export default { plugins: { "@tailwindcss/postcss": {} } };
 - `docker compose config` 可正常展開
 - production compose 無任何 `ports`
 - `.env.example` 只含本專案需要的變數，所有 secret 是 `CHANGE_ME_...` 前綴
-- 有 Prisma：`prisma generate` 與 migration 可在 container 內通過
+- 有 Prisma：`migrate` service 能成功執行 `prisma migrate deploy` 後退出（exit 0）
 - §B/C：FastAPI `/health` 存在；瀏覽器端無 `FASTAPI_SERVICE_URL` 直連
 - 無 GPU 專案不含 `deploy.resources.devices`
 - `AGENTS.md` 已刪除不適用的架構/Auth/GPU/LLM 說明
@@ -878,7 +920,7 @@ export default { plugins: { "@tailwindcss/postcss": {} } };
 
 （擇一）Auth-0：無登入；不建立 auth.ts / middleware.ts / login page
 （擇一）Auth-1：Next.js 單一密碼（`APP_PASSWORD`），middleware.ts 保護全站
-（擇一）Auth-2：Next.js 個人帳號，email/password（+ Google OAuth），layout redirect 保護
+（擇一）Auth-2：Next.js 個人帳號，email/password（+ Google OAuth），layout redirect 保護（§A/B only，§C 不選）
 （選配）Auth-3：backend 內部授權 / guest / session token；疊加在 Auth-1/2 上，不是主要登入
 
 ## 常用指令
@@ -907,7 +949,7 @@ docker compose run --rm fastapi alembic upgrade head
 - Next.js 16 + Prisma 7；Node image 使用 `node:22-bookworm-slim`
 - §B/C：前端呼叫 backend 一律走 `/api/fastapi/...` proxy，不直接打 `FASTAPI_SERVICE_URL`
 - 人類使用者登入放在 Next.js；backend 只處理內部 token 與資源授權（Auth-3）
-- DB migration：`prisma migrate dev` 建立檔案，`entrypoint.sh` 在 production 部署時自動執行 `prisma migrate deploy`
+- DB migration：`prisma migrate dev` 建立檔案，production 部署時由 `migrate` service（builder target）自動執行 `prisma migrate deploy`，`app` 等它 `service_completed_successfully` 後才啟動
 - Prisma 7：使用 `prisma.config.ts`、`prisma-client` provider、`src/generated/prisma`、`@prisma/adapter-pg`
 - Server Actions 預設；有 streaming 或外部 webhook 才改 API Route
 - （專案自訂規則加在這裡）
