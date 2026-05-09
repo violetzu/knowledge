@@ -279,31 +279,23 @@ dev stack 使用 `target: dev` 與自己的 `command`。
 §B 無 Alembic 時：
 ```dockerfile
 FROM python:3.11-slim
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 WORKDIR /app
-ENV UV_PROJECT_ENVIRONMENT=/opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-COPY pyproject.toml uv.lock ./
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
-CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
 §C 有 Alembic 時，必須接上 entrypoint：
 ```dockerfile
 FROM python:3.11-slim
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 WORKDIR /app
-ENV UV_PROJECT_ENVIRONMENT=/opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-COPY pyproject.toml uv.lock ./
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 RUN chmod +x /app/entrypoint.sh
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
 `main.py` 至少需要 healthcheck：
@@ -510,7 +502,7 @@ services:
   fastapi:
     volumes:
       - ./fastapi-service:/app
-    command: uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 §C 的 `app` command 移除 `npx prisma generate`；`--reload` 時 alembic migration 不自動跑，開發期手動執行：
@@ -636,8 +628,7 @@ async function handler(req: NextRequest, { params }: { params: Promise<{ path: s
 ├── fastapi-service/
 │   ├── Dockerfile
 │   ├── .dockerignore               # 獨立一份，根目錄的對子目錄 build context 無效
-│   ├── pyproject.toml
-│   ├── uv.lock
+│   ├── requirements.txt
 │   ├── main.py
 │   └── entrypoint.sh              # §C only（alembic upgrade head）
 └── data/
@@ -708,6 +699,8 @@ export const { GET, POST } = handlers;
 ```
 
 docker-compose `environment` 加 `AUTH_TRUST_HOST: "true"`。
+
+Chrome 密碼管理器會在 hydration 前注入 `__gcruniqueid` 到 `<form>` 和 `<input type="password">`，造成 hydration mismatch warning。在這兩個元素加 `suppressHydrationWarning` 即可，不影響功能。
 
 ### Auth-2：個人帳號
 
@@ -790,7 +783,7 @@ def verify_internal_token(token: str) -> dict:
 ### D0. FastAPI ML 依賴
 
 - 無 GPU：`python:3.11-slim`，需要 CV 加 `apt-get install ffmpeg libgl1 libglib2.0-0`
-- 有 CUDA：換 `pytorch/pytorch:2.4.0-cuda12.4-cudnn9-runtime`；`torch` 由 base image 提供，移出 `pyproject.toml dependencies`；其餘套件仍用 `uv sync --frozen --no-dev`（建 `.venv`）+ `CMD ["uv", "run", "uvicorn", ...]`
+- 有 CUDA：換 `pytorch/pytorch:2.4.0-cuda12.4-cudnn9-runtime`；`torch` 由 base image 提供，從 `requirements.txt` 移除；其餘套件仍用 `pip install -r requirements.txt`
 - GPU compose reservation 只加在需要 GPU 的 service；無 GPU 主機不保留 `deploy.resources`
 
 ```yaml
