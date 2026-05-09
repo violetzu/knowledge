@@ -15,8 +15,8 @@
 |------|------|
 | **專案名稱** | 全小寫英數，會用作 DB user、DB name、資料夾名、docker service 名 |
 | **架構** | §A / §B / §C（見 Section 1 決策樹） |
-| **Auth 方式** | Auth-0 不需要 / Auth-1 單一密碼 / Auth-2 個人帳號（§C 禁用，見 Auth 章節） |
-| **部署網址** | `https://<domain>`，填入 AGENTS.md；Auth-1/2 另填入 `AUTH_URL` |
+| **Auth 方式** | Auth-0 不需要 / Auth-1 單一密碼 / 個人帳號：§B 由 Next.js 實作（Auth.js）、§C 由 FastAPI 實作（自訂 JWT）——看 DB 在哪邊 |
+| **部署網址** | Auth-1/2 填入 `AUTH_URL`（.env），不寫進 AGENTS.md 避免上 git 洩漏 |
 
 ### 選問（影響架構，沒提到就問）
 
@@ -621,6 +621,10 @@ async function handler(req: NextRequest, { params }: { params: Promise<{ path: s
 ├── .dockerignore                   # 必須包含 data/
 ├── prisma/schema.prisma
 ├── src/
+│   ├── app/
+│   ├── components/
+│   ├── hooks/                      # 5+ 個或跨 component 共用時才獨立；少量可省略
+│   ├── lib/
 │   ├── generated/prisma/           # generated client，不提交（.gitignore 排除）
 │   └── lib/prisma.ts
 └── data/postgres/                  # volume 掛載目錄，不提交
@@ -632,6 +636,7 @@ async function handler(req: NextRequest, { params }: { params: Promise<{ path: s
 ├── fastapi-service/
 │   ├── Dockerfile
 │   ├── .dockerignore               # 獨立一份，根目錄的對子目錄 build context 無效
+│   ├── .gitignore                  # Python ignores（__pycache__/ *.pyc .venv/）只放這層
 │   ├── requirements.txt
 │   ├── main.py
 │   └── entrypoint.sh              # §C only（alembic upgrade head）
@@ -645,8 +650,9 @@ async function handler(req: NextRequest, { params }: { params: Promise<{ path: s
 
 ## 12. Auth
 
-> Auth Pattern（Auth-0/1/2）與架構 §A/§B/§C 是不同維度。
-> **§C 禁用 Auth-2**：§C 定義為 FastAPI 管 DB、Next.js 不碰 DB；Auth-2 需要 Auth.js PrismaAdapter 與 Auth tables，會破壞 ownership。需要個人帳號時改選 §B，或另行設計 FastAPI 持有的登入系統。
+Auth-0/1/2 是「登入方式」三選一；Auth-3 是獨立的服務間授權機制，不屬於登入方式選項。
+
+- **Auth-2 個人帳號** 有兩條實作路徑，看 DB 在哪邊：§A/B 由 Next.js 實作（Auth.js + Prisma）；§C 由 FastAPI 實作（自訂 JWT，Next.js 無 Auth.js）
 
 ### Auth-0：無登入
 
@@ -708,9 +714,9 @@ Chrome 密碼管理器會在 hydration 前注入 `__gcruniqueid` 到 `<form>` �
 
 ### Auth-2：個人帳號
 
-**僅限 §A/B。§C 禁用 Auth-2；需要個人帳號時改選 §B，或讓 FastAPI 自行持有登入與帳號 DB。**
+**§A/B**：Next.js 實作（Auth.js + Prisma），以下為實作範例。**§C**：FastAPI 自行實作 JWT 登入（login / register endpoint、user table 在 FastAPI 側），不使用 Auth.js。
 
-套件：`next-auth@beta @auth/prisma-adapter bcryptjs zod`，dev: `@types/bcryptjs`
+套件（§A/B）：`next-auth@beta @auth/prisma-adapter bcryptjs zod`，dev: `@types/bcryptjs`
 
 關鍵點：
 - `session: { strategy: "jwt" }` — PrismaAdapter 預設 database session 每 request 打 DB，JWT 更輕量
@@ -746,7 +752,9 @@ if (!rateLimit(`auth:${ip}`, 10, 60_000)) {
 
 `cf-connecting-ip` 是 Cloudflare Tunnel 傳入的真實 IP，優先使用。
 
-### Auth-3：Backend 內部授權（疊加在 Auth-1/2 上）
+### Auth-3：服務間內部授權（§B/C proxy → FastAPI）
+
+與登入方式無關，是 Next.js proxy route 對 FastAPI 的額外保護層，確保 FastAPI 只接受來自 Next.js 的請求。§B/C 預設加入；若 FastAPI 已有完整 user JWT 系統（§C Auth-2），服務間保護已由 user token 涵蓋，可省略。
 
 Next.js 簽發給 FastAPI 的 short-lived internal JWT（`FASTAPI_API_SECRET` 簽名，`INTERNAL_TOKEN_EXPIRE_MINUTES` 控制時效）：
 
@@ -842,7 +850,22 @@ up-vllm:  ## Start with vLLM
 
 ---
 
-## 14. UI：Tailwind v4 + shadcn/ui
+## 14. create-next-app 後清理
+
+`create-next-app` 產生的垃圾檔，建立後立即清除：
+
+**刪除：**
+- `public/file.svg` `public/globe.svg` `public/next.svg` `public/vercel.svg` `public/window.svg`
+- `src/app/fonts/`（Geist 字型）
+
+**替換：**
+- `src/app/page.tsx` → 空白頁
+- `src/app/globals.css` → Tailwind v4 版本（見 §15）
+- `src/app/layout.tsx` → 移除 Geist font import 與 `className` 裡的 font variable
+
+---
+
+## 15. UI：Tailwind v4 + shadcn/ui
 
 v4 語法與 v3 不同：
 ```css
@@ -864,7 +887,7 @@ export default { plugins: { "@tailwindcss/postcss": {} } };
 
 ---
 
-## 15. .dockerignore
+## 16. .dockerignore
 
 根目錄的 `.dockerignore` 對子目錄 build context 無效——§B/C 的 `fastapi-service/` 要另建一份。
 
@@ -877,18 +900,19 @@ node_modules/
 !.env.example
 .git/
 data/
-__pycache__/
-*.pyc
 *.dump
+fastapi-service/
 ```
 
 `fastapi-service/`（§B/C）：`__pycache__/ *.pyc .venv/ .env*`
+
+`fastapi-service/.gitignore`（§B/C）：`__pycache__/ *.pyc .venv/`（Python ignores 只放這層，root 已 exclude 整個 fastapi-service/ 目錄）
 
 `.gitignore` 必備：`.env`、`data/`、`*.dump`；有 Prisma 加 `src/generated/prisma/`。
 
 ---
 
-## 16. 生成完成檢查清單
+## 17. 生成完成檢查清單
 
 - `docker compose config` 可正常展開
 - production compose 無任何 `ports`
@@ -900,7 +924,7 @@ __pycache__/
 
 ---
 
-## 17. AGENTS.md 模板
+## 18. AGENTS.md 模板
 
 括號內的選項擇一保留，其餘刪除。
 
@@ -918,14 +942,13 @@ __pycache__/
 （擇一）§C：FastAPI 主導 + Next.js 薄殼，DB 由 FastAPI 管（SQLModel + Alembic）
 
 專案名（DB user / DB name）：`<project>`
-部署網址：`https://<domain>`
 
 ## Auth
 
 （擇一）Auth-0：無登入；不建立 auth.ts / middleware.ts / login page
 （擇一）Auth-1：Next.js 單一密碼（`APP_PASSWORD`），middleware.ts 保護全站
-（擇一）Auth-2：Next.js 個人帳號，email/password（+ Google OAuth），layout redirect 保護（§A/B only，§C 不選）
-（選配）Auth-3：backend 內部授權 / guest / session token；疊加在 Auth-1/2 上，不是主要登入
+（擇一）Auth-2 §A/B：Next.js 個人帳號（Auth.js + Prisma），email/password（+ Google OAuth），layout redirect 保護
+（擇一）Auth-2 §C：FastAPI 個人帳號（自訂 JWT），login / register 在 FastAPI 側，Next.js 無 Auth.js
 
 ## 常用指令
 
@@ -952,7 +975,8 @@ docker compose run --rm fastapi alembic upgrade head
 - 本機不安裝任何 Node / Python 套件，所有指令透過 Docker 執行
 - Next.js 16 + Prisma 7；Node image 使用 `node:22-bookworm-slim`
 - §B/C：前端呼叫 backend 一律走 `/api/fastapi/...` proxy，不直接打 `FASTAPI_SERVICE_URL`
-- 人類使用者登入放在 Next.js；backend 只處理內部 token 與資源授權（Auth-3）
+- Auth-1/2 §A/B：登入由 Next.js 處理；Auth-2 §C：登入由 FastAPI 處理
+- §B/C proxy route 預設附帶 Auth-3 JWT（`FASTAPI_API_SECRET` 簽名）；§C Auth-2 FastAPI 已有 user JWT 時可省略
 - DB migration：`prisma migrate dev` 建立檔案，production 部署時由 `migrate` service（builder target）自動執行 `prisma migrate deploy`，`app` 等它 `service_completed_successfully` 後才啟動
 - Prisma 7：使用 `prisma.config.ts`、`prisma-client` provider、`src/generated/prisma`、`@prisma/adapter-pg`
 - Server Actions 預設；有 streaming 或外部 webhook 才改 API Route
