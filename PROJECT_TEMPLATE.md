@@ -996,4 +996,8 @@ docker compose run --rm fastapi alembic upgrade head
 - Node 22，Python 3.11（§B/C）
 - PostgreSQL 16
 - GPU：（填入：不需要 / nvidia，用於 <服務名>）
+
+## 維護說明
+
+本文件由 AI 維護。架構、Auth 模式、服務名稱、開發規則有變動時，同步更新本文件。
 ````
