@@ -1,4 +1,4 @@
-闔上螢幕不休眠
+## 闔上螢幕不休眠
 ```sh
 sudo nano /etc/systemd/logind.conf
 ```
