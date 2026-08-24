@@ -4,6 +4,24 @@
 ### [ssh 改 port](#ssh-改-port)
 
 
+# 安裝ssh
+在 Ubuntu 上安裝 SSH
+```
+sudo apt update
+sudo apt install openssh-server -y
+```
+啟動並確認狀態
+```sh
+sudo systemctl enable ssh
+sudo systemctl start ssh
+sudo systemctl status ssh
+```
+
+開放防火牆（若有啟用 ufw）
+```sh
+sudo ufw allow ssh
+```
+
 # 使用者&權限
 
 顯示所有使用者
